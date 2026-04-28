@@ -209,4 +209,4 @@ def export_googlesheets(payload: ExportGoogleSheetsRequest):
 
 @app.get("/")
 def root():
-    return {"name": "de.bias API", "version": "0.3.0", "status": "running", "ai": "Gemini 1.5 Flash"}
+    return {"name": "de.bias API", "version": "0.3.0", "status": "running", "ai": "Gemini 2.0 Flash"}
