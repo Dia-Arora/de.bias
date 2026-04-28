@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from math import exp, log
 
@@ -9,25 +10,44 @@ import pandas as pd
 from schema_catalog import CATEGORICAL_DEFAULTS
 from schemas import ColumnConfig, DeBiasConfig, SchemaColumn
 
-try:
-    from sdv.metadata import SingleTableMetadata
-    from sdv.single_table import GaussianCopulaSynthesizer
-
-    SDV_AVAILABLE = True
-except Exception:
-    SingleTableMetadata = None
-    GaussianCopulaSynthesizer = None
-    SDV_AVAILABLE = False
+SDV_AVAILABLE = False
+SDV_VERSION = "disabled"
 
 
-SDV_VERSION = "unavailable"
-if SDV_AVAILABLE:
+def _sdv_enabled() -> bool:
+    """Guardrail: SDV is opt-in via env to keep free-tier memory stable."""
+    return os.getenv("DEBIAS_USE_SDV", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _try_import_sdv():
+    """Lazy import SDV only when explicitly enabled.
+
+    Importing SDV (and its transitive deps) is memory-heavy; keeping it out of
+    module import time makes Render free tier deployments far more stable.
+    """
+    global SDV_AVAILABLE, SDV_VERSION
+    if not _sdv_enabled():
+        SDV_AVAILABLE = False
+        SDV_VERSION = "disabled"
+        return None, None, None
+
     try:
-        import sdv
+        from sdv.metadata import SingleTableMetadata  # type: ignore
+        from sdv.single_table import GaussianCopulaSynthesizer  # type: ignore
 
-        SDV_VERSION = sdv.__version__
+        try:
+            import sdv  # type: ignore
+
+            SDV_VERSION = getattr(sdv, "__version__", "installed")
+        except Exception:
+            SDV_VERSION = "installed"
+
+        SDV_AVAILABLE = True
+        return SingleTableMetadata, GaussianCopulaSynthesizer, SDV_VERSION
     except Exception:
-        SDV_VERSION = "installed"
+        SDV_AVAILABLE = False
+        SDV_VERSION = "unavailable"
+        return None, None, SDV_VERSION
 
 
 EMPLOYMENT = ["Employed", "Self-employed", "Unemployed", "Retired"]
@@ -225,6 +245,7 @@ def create_seed_dataframe(schema: list[SchemaColumn], rows: int = 120) -> pd.Dat
 
 
 def create_metadata(schema: list[SchemaColumn]):
+    SingleTableMetadata, _, _ = _try_import_sdv()
     if not SDV_AVAILABLE or SingleTableMetadata is None:
         return None
 
@@ -279,6 +300,7 @@ def sample_base_dataset(config: DeBiasConfig, schema: list[SchemaColumn]) -> Gen
     seed_df = create_seed_dataframe(schema)
     fit_df = seed_df.drop(columns=["approval_score"], errors="ignore")
 
+    _, GaussianCopulaSynthesizer, _ = _try_import_sdv()
     if SDV_AVAILABLE and GaussianCopulaSynthesizer is not None:
         try:
             metadata = create_metadata(schema)

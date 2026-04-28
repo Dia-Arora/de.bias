@@ -235,6 +235,22 @@ def run_pipeline(
     GenerationResult — a typed intermediate result. Call serialize_result() to
     convert to the HTTP response dict.
     """
+    # Free-tier guardrails: keep requests bounded to avoid OOM restarts.
+    # Defaults are intentionally conservative; override via env vars.
+    try:
+        max_dataset_size = int(os.getenv("DEBIAS_MAX_DATASET_SIZE", "600"))
+    except Exception:
+        max_dataset_size = 600
+
+    if config.datasetSize > max_dataset_size:
+        raise ValueError(
+            f"Requested datasetSize={config.datasetSize} exceeds limit={max_dataset_size} for this deployment."
+        )
+
+    max_schema_columns = 25
+    if len(schema) > max_schema_columns:
+        raise ValueError(f"Schema too large: {len(schema)} columns (max {max_schema_columns} on this deployment).")
+
     # Resolve defaults lazily — env vars are checked at call time, not import time.
     if synthesizer is None:
         synthesizer = SDVSynthesizerAdapter()
@@ -250,7 +266,7 @@ def run_pipeline(
     started = time.perf_counter()
 
     artifacts = synthesizer.sample(config, schema)
-    base_df = artifacts.base_dataset.copy()
+    base_df = artifacts.base_dataset
 
     if "approval_score" not in base_df.columns:
         base_df["approval_score"] = 0.5
@@ -317,17 +333,32 @@ def serialize_result(result: GenerationResult) -> dict[str, Any]:
     output_columns = [c.name for c in result.schema]
     monitored = [c.name for c in monitored_columns(result.schema)]
 
-    clean_after = result.after_df.reindex(columns=output_columns).copy()
+    try:
+        max_response_rows = int(os.getenv("DEBIAS_MAX_RESPONSE_ROWS", "200"))
+    except Exception:
+        max_response_rows = 200
+
+    clean_after = result.after_df.reindex(columns=output_columns)
     clean_after = clean_after.replace([float("inf"), float("-inf")], 0).fillna(0)
 
-    clean_before = result.before_df.reindex(columns=output_columns).copy()
+    clean_before = result.before_df.reindex(columns=output_columns)
     clean_before = clean_before.replace([float("inf"), float("-inf")], 0).fillna(0)
+
+    after_total_rows = int(clean_after.shape[0])
+    before_total_rows = int(clean_before.shape[0])
+
+    if max_response_rows > 0:
+        clean_after = clean_after.head(max_response_rows)
+        clean_before = clean_before.head(max_response_rows)
 
     time_s = round(result.generation_time_ms / 1000, 2)
 
     return {
         "dataset": clean_after.to_dict(orient="records"),
         "beforeDataset": clean_before.to_dict(orient="records"),
+        "datasetTotalRows": after_total_rows,
+        "beforeDatasetTotalRows": before_total_rows,
+        "datasetTruncated": after_total_rows > len(clean_after),
         "metrics": result.after_metrics,
         "beforeMetrics": result.before_metrics,
         "fairnessReport": {

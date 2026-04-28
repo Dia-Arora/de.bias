@@ -90,29 +90,17 @@ def health():
 
 @app.post("/generate")
 def generate(payload: GenerateRequest):
+    _validate_schema(payload.schema)
     try:
-        # Limit dataset size to reduce memory usage on Render free tier
-        payload.config.datasetSize = min(payload.config.datasetSize, 200)
-
-        _validate_schema(payload.schema)
         result = run_pipeline(payload.schema, payload.config)
-        response_data = serialize_result(result)
-
-        # Explicit memory cleanup
-        del result
-        import gc
-        gc.collect()
-
-        return response_data
-    except Exception as exc:
-        import gc
-        gc.collect()
-        print(f"Error in /generate: {exc}")
-        return {
-            "status": "fallback",
-            "data": [],
-            "report": "Fallback: dataset generated and fairness improved across groups. AI explanation temporarily unavailable."
-        }
+        return serialize_result(result)
+    except MemoryError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Generation exceeded memory limits. Reduce dataset size or simplify the schema and retry.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/suggest-columns", response_model=SuggestColumnsResponse)
