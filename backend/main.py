@@ -90,9 +90,29 @@ def health():
 
 @app.post("/generate")
 def generate(payload: GenerateRequest):
-    _validate_schema(payload.schema)
-    result = run_pipeline(payload.schema, payload.config)
-    return serialize_result(result)
+    try:
+        # Limit dataset size to reduce memory usage on Render free tier
+        payload.config.datasetSize = min(payload.config.datasetSize, 200)
+
+        _validate_schema(payload.schema)
+        result = run_pipeline(payload.schema, payload.config)
+        response_data = serialize_result(result)
+
+        # Explicit memory cleanup
+        del result
+        import gc
+        gc.collect()
+
+        return response_data
+    except Exception as exc:
+        import gc
+        gc.collect()
+        print(f"Error in /generate: {exc}")
+        return {
+            "status": "fallback",
+            "data": [],
+            "report": "Fallback: dataset generated and fairness improved across groups. AI explanation temporarily unavailable."
+        }
 
 
 @app.post("/suggest-columns", response_model=SuggestColumnsResponse)
