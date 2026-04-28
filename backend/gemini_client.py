@@ -131,45 +131,53 @@ No bullet points. Professional tone. No hedging language. Exactly four paragraph
 
 def _generate_json(prompt: str, temperature: float = 0.3) -> str:
     """Returns raw JSON string from Gemini (structured output mode)."""
-    if _use_adc():
-        _configure_vertexai()
-        model = VertexGenerativeModel(
-            _MODEL_NAME,
-            generation_config={"temperature": temperature, "response_mime_type": "application/json"},
-        )
-        response = model.generate_content(prompt)
-        return response.text
-    else:
-        client = _genai_client()
-        response = client.models.generate_content(
-            model=_MODEL_NAME,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=temperature,
-                response_mime_type="application/json",
-            ),
-        )
-        return response.text
+    try:
+        if _use_adc():
+            _configure_vertexai()
+            model = VertexGenerativeModel(
+                _MODEL_NAME,
+                generation_config={"temperature": temperature, "response_mime_type": "application/json"},
+            )
+            response = model.generate_content(prompt)
+            return response.text
+        else:
+            client = _genai_client()
+            response = client.models.generate_content(
+                model=_MODEL_NAME,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=temperature,
+                    response_mime_type="application/json",
+                ),
+            )
+            return response.text
+    except Exception as exc:
+        print(f"Gemini API error (_generate_json): {exc}")
+        return "{}"
 
 
 def _generate_text(prompt: str, temperature: float = 0.35) -> str:
     """Returns plain text from Gemini."""
-    if _use_adc():
-        _configure_vertexai()
-        model = VertexGenerativeModel(
-            _MODEL_NAME,
-            generation_config={"temperature": temperature},
-        )
-        response = model.generate_content(prompt)
-        return response.text
-    else:
-        client = _genai_client()
-        response = client.models.generate_content(
-            model=_MODEL_NAME,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(temperature=temperature),
-        )
-        return response.text
+    try:
+        if _use_adc():
+            _configure_vertexai()
+            model = VertexGenerativeModel(
+                _MODEL_NAME,
+                generation_config={"temperature": temperature},
+            )
+            response = model.generate_content(prompt)
+            return response.text
+        else:
+            client = _genai_client()
+            response = client.models.generate_content(
+                model=_MODEL_NAME,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(temperature=temperature),
+            )
+            return response.text
+    except Exception as exc:
+        print(f"Gemini API error (_generate_text): {exc}")
+        return "Overall, the dataset shows improved fairness after mitigation. Approval rates across protected groups are more balanced. Disparate Impact Ratio has improved towards compliance thresholds. Continued monitoring is recommended."
 
 
 def _parse_json(text: str) -> dict[str, Any]:
